@@ -52,3 +52,97 @@ class MiniResNet(nn.Module):
         # Fully Connected Layer
         x = self.fc(x)
         return x
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from dataset import TurbineDataset  # Custom dataset for Parquet files
+from model import MiniResNet  # The small ResNet-based model
+import os
+
+# Hyperparameters
+BATCH_SIZE = 32
+LEARNING_RATE = 0.001
+EPOCHS = 20
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Load the dataset
+train_dataset = TurbineDataset(data_dir="data/train")
+val_dataset = TurbineDataset(data_dir="data/val")
+
+# Create DataLoaders
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
+
+# Initialize model, loss function, and optimizer
+model = MiniResNet(num_classes=5).to(DEVICE)  # Adjust num_classes as per your dataset
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+# Training loop
+def train():
+    best_val_loss = float("inf")
+
+    for epoch in range(EPOCHS):
+        model.train()
+        total_loss, correct, total = 0, 0, 0
+
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
+
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+            _, predicted = outputs.max(1)
+            correct += (predicted == labels).sum().item()
+            total += labels.size(0)
+
+        train_acc = 100.0 * correct / total
+        train_loss = total_loss / len(train_loader)
+
+        # Validation
+        val_loss, val_acc = validate()
+
+        print(f"Epoch [{epoch+1}/{EPOCHS}] - "
+              f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% - "
+              f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+
+        # Save best model
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            save_model()
+
+# Validation function
+def validate():
+    model.eval()
+    total_loss, correct, total = 0, 0, 0
+
+    with torch.no_grad():
+        for inputs, labels in val_loader:
+            inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+
+            total_loss += loss.item()
+            _, predicted = outputs.max(1)
+            correct += (predicted == labels).sum().item()
+            total += labels.size(0)
+
+    val_loss = total_loss / len(val_loader)
+    val_acc = 100.0 * correct / total
+    return val_loss, val_acc
+
+# Save model function
+def save_model():
+    os.makedirs("saved_models", exist_ok=True)
+    torch.save(model.state_dict(), "saved_models/mini_resnet.pth")
+    print("Model saved successfully!")
+
+if __name__ == "__main__":
+    train()
